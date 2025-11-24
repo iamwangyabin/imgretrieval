@@ -17,6 +17,16 @@ def init_db():
         )
     """)
     # 0=Pending, 1=Processed, 2=Failed
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS features (
+            image_id INTEGER PRIMARY KEY,
+            vector BLOB NOT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(image_id) REFERENCES images(id)
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -74,6 +84,51 @@ def mark_as_failed(image_id: int):
     cursor.execute("UPDATE images SET status = 2 WHERE id = ?", (image_id,))
     conn.commit()
     conn.close()
+
+def save_feature_batch(features_data: List[Tuple[int, bytes]]):
+    """
+    Save a batch of features.
+    features_data: List of (image_id, vector_bytes)
+    """
+    if not features_data:
+        return
+        
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.executemany("""
+            INSERT OR REPLACE INTO features (image_id, vector) 
+            VALUES (?, ?)
+        """, features_data)
+        conn.commit()
+    finally:
+        conn.close()
+
+def get_all_features() -> Tuple[List[str], List[bytes]]:
+    """
+    Get all features and their corresponding image paths.
+    Returns (paths, vectors_bytes)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Join with images table to get paths, only for valid features
+    cursor.execute("""
+        SELECT i.path, f.vector 
+        FROM features f 
+        JOIN images i ON f.image_id = i.id 
+        ORDER BY i.id ASC
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    if not rows:
+        return [], []
+        
+    paths = [r[0] for r in rows]
+    vectors = [r[1] for r in rows]
+    return paths, vectors
 
 def get_all_processed_paths() -> List[str]:
     """Get all processed image paths sorted by ID."""

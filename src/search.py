@@ -1,8 +1,9 @@
+```python
 import os
 import numpy as np
 import faiss
-from .config import FEATURES_PATH, FEATURE_DIM
-from .database import get_all_processed_paths
+from .config import FEATURE_DIM
+from .database import get_all_features
 from .model import FeatureExtractor
 
 class SearchEngine:
@@ -13,39 +14,21 @@ class SearchEngine:
         self.load_index()
 
     def load_index(self):
-        """Load features from disk and build FAISS index."""
-        if not os.path.exists(FEATURES_PATH):
-            print("No features file found.")
+        """Load features from database and build FAISS index."""
+        print("Loading features from database...")
+        self.paths, vectors = get_all_features()
+        
+        if not self.paths:
+            print("No features found in DB.")
             return
 
-        # Load paths
-        self.paths = get_all_processed_paths()
-        num_images = len(self.paths)
+        # Convert list of bytes to numpy array
+        # Each vector is FEATURE_DIM float32s
+        # We can use np.frombuffer for each and stack, or join bytes and frombuffer
         
-        if num_images == 0:
-            print("No processed images found in DB.")
-            return
-
-        # Memory map the features file
-        # The file size should be num_images * FEATURE_DIM * 4 bytes (float32)
-        expected_size = num_images * FEATURE_DIM * 4
-        file_size = os.path.getsize(FEATURES_PATH)
-        
-        if file_size != expected_size:
-            print(f"Warning: File size {file_size} does not match expected size {expected_size}. Index might be out of sync.")
-            # In a real system, we might want to truncate or re-process. 
-            # For now, we'll try to map as many as we can.
-            num_vectors = file_size // (FEATURE_DIM * 4)
-            # Adjust paths if necessary
-            if num_vectors < num_images:
-                self.paths = self.paths[:num_vectors]
-            elif num_vectors > num_images:
-                 # This shouldn't happen if DB and file are in sync, but if it does, 
-                 # we can only search up to what we have paths for.
-                 pass
-
-        print(f"Loading {len(self.paths)} vectors from disk...")
-        self.features = np.memmap(FEATURES_PATH, dtype='float32', mode='r', shape=(len(self.paths), FEATURE_DIM))
+        # More efficient: join all bytes then frombuffer
+        all_bytes = b''.join(vectors)
+        self.features = np.frombuffer(all_bytes, dtype='float32').reshape(len(self.paths), FEATURE_DIM)
 
         # Build FAISS index
         # IndexFlatIP is exact search for Inner Product (which is Cosine Similarity for normalized vectors)
