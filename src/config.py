@@ -12,7 +12,7 @@ MODEL_NAME = "vit_base_patch16_dinov3.lvd1689m"
 FEATURE_DIM = 768
 
 # Processing
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 
 # Ensure data directory exists
 os.makedirs(DATA_DIR, exist_ok=True)

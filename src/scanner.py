@@ -2,7 +2,7 @@ import os
 from .database import insert_images_batch
 
 VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
-BATCH_SIZE = 1000
+BATCH_SIZE = 10000
 
 def scan_directory(root_dir: str):
     """
