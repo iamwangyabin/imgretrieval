@@ -1,7 +1,8 @@
 import os
-from .database import insert_image
+from .database import insert_images_batch
 
 VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+BATCH_SIZE = 1000
 
 def scan_directory(root_dir: str):
     """
@@ -9,6 +10,7 @@ def scan_directory(root_dir: str):
     Returns the number of new images added.
     """
     new_count = 0
+    batch = []
     print(f"Scanning {root_dir}...")
     
     for root, _, files in os.walk(root_dir):
@@ -16,10 +18,19 @@ def scan_directory(root_dir: str):
             ext = os.path.splitext(file)[1].lower()
             if ext in VALID_EXTENSIONS:
                 full_path = os.path.join(root, file)
-                if insert_image(full_path):
-                    new_count += 1
-                    if new_count % 1000 == 0:
-                        print(f"Found {new_count} new images...")
+                batch.append(full_path)
+                
+                # Insert batch when it reaches BATCH_SIZE
+                if len(batch) >= BATCH_SIZE:
+                    inserted = insert_images_batch(batch)
+                    new_count += inserted
+                    print(f"Processed {new_count} new images...")
+                    batch = []
+    
+    # Insert remaining images
+    if batch:
+        inserted = insert_images_batch(batch)
+        new_count += inserted
     
     print(f"Scan complete. Added {new_count} new images.")
     return new_count

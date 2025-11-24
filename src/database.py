@@ -32,6 +32,24 @@ def insert_image(path: str) -> bool:
     finally:
         conn.close()
 
+def insert_images_batch(paths: List[str]) -> int:
+    """
+    Insert multiple image paths in a single transaction.
+    Returns the number of new images inserted.
+    """
+    if not paths:
+        return 0
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.executemany("INSERT OR IGNORE INTO images (path) VALUES (?)", [(p,) for p in paths])
+        inserted = cursor.rowcount
+        conn.commit()
+        return inserted
+    finally:
+        conn.close()
+
 def get_pending_images(limit: int = 32) -> List[Tuple[int, str]]:
     """Get a batch of pending images (status=0)."""
     conn = get_connection()
