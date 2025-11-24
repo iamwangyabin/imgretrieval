@@ -14,6 +14,10 @@ class FeatureExtractor:
         self.model = timm.create_model(MODEL_NAME, pretrained=True, num_classes=0)
         self.model.to(self.device)
         self.model.eval()
+
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs!")
+            self.model = torch.nn.DataParallel(self.model)
         
         # Get data config and create transform using timm's built-in configuration
         config = resolve_data_config({}, model=self.model)
