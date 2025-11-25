@@ -3,9 +3,9 @@ import pickle
 import numpy as np
 import faiss
 from typing import List, Tuple, Optional
-from .config import INDEX_PATH, DATA_DIR, FEATURE_DIM
-from .database import get_all_features
-from .model import FeatureExtractor
+from src.config import INDEX_PATH, DATA_DIR, FEATURE_DIM
+from src.database import get_all_features
+from src.model import FeatureExtractor
 
 
 class SearchEngine:

@@ -1,5 +1,5 @@
 import os
-from .database import insert_images_batch
+from src.database import insert_images_batch
 
 VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
 BATCH_SIZE = 100000

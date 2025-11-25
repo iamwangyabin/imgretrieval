@@ -3,7 +3,7 @@ import timm
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
 from PIL import Image
-from .config import MODEL_NAME
+from src.config import MODEL_NAME
 
 class FeatureExtractor:
     def __init__(self):

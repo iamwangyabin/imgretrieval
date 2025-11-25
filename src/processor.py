@@ -1,8 +1,8 @@
 import os
 import numpy as np
-from .config import BATCH_SIZE
-from .database import get_pending_images, mark_as_processed, mark_as_failed, save_feature_batch
-from .model import FeatureExtractor
+from src.config import BATCH_SIZE
+from src.database import get_pending_images, mark_as_processed, mark_as_failed, save_feature_batch
+from src.model import FeatureExtractor
 
 def process_images():
     extractor = FeatureExtractor()
