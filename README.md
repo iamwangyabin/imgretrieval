@@ -187,11 +187,6 @@ BATCH_SIZE = 32                                   # 批处理大小
 
 ## 🔧 常见问题
 
-### 1. 如何更换模型？
-
-修改 `src/config.py` 中的 `MODEL_NAME`，可选择 timm 支持的其他模型：
-- `vit_large_patch16_dinov3.lvd1689m` (更大更准确)
-- `vit_small_patch16_dinov3.lvd1689m` (更快更轻量)
 
 ### 2. 如何添加新图像？
 
@@ -202,24 +197,7 @@ python main.py process
 
 然后重启 Streamlit 应用以重新加载索引。
 
-### 3. 特征文件和数据库不同步怎么办？
 
-删除 `data/features.bin` 和 `data/db.sqlite3`，重新初始化：
-```bash
-rm data/features.bin data/db.sqlite3
-python main.py init
-python main.py scan /path/to/images
-python main.py process
-```
-
-## 📝 TODO
-
-- [ ] 支持图像去重功能
-- [ ] 添加增量索引 API
-- [ ] 支持更多图像格式
-- [ ] 优化大规模数据集的索引速度
-- [ ] 添加配置文件支持
-- [ ] Docker 部署支持
 
 ## 📄 License
 
