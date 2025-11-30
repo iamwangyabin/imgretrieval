@@ -17,6 +17,43 @@ from src.database import get_all_processed_paths
 from src.search import SearchEngine
 
 
+def remove_duplicate_results(results, similarity_threshold=0.98):
+    """
+    Remove visually similar duplicate images from search results.
+    
+    Images with very similar scores (within threshold) are likely duplicates
+    (same image with different filenames), so we keep only the first one.
+    
+    Args:
+        results: List of (image_path, similarity_score) tuples
+        similarity_threshold: Score difference threshold for considering images as duplicates
+        
+    Returns:
+        Filtered list with duplicates removed
+    """
+    if not results:
+        return results
+    
+    filtered_results = []
+    
+    for path, score in results:
+        # Check if this result is similar to any already added result
+        is_duplicate = False
+        
+        for added_path, added_score in filtered_results:
+            # If scores are very close (within threshold), likely duplicate
+            score_diff = abs(score - added_score)
+            if score_diff < (1.0 - similarity_threshold):
+                is_duplicate = True
+                break
+        
+        # If not a duplicate, add to filtered results
+        if not is_duplicate:
+            filtered_results.append((path, score))
+    
+    return filtered_results
+
+
 def load_and_resize_image(image_path, target_size=(150, 150)):
     """Load and resize an image to target size."""
     try:
@@ -189,7 +226,8 @@ def create_retrieval_grid(query_paths, search_results, output_path, top_k=10):
     return canvas
 
 
-def run_retrieval_test(n_queries=10, top_k=10, output_path="retrieval_test_results.jpg"):
+def run_retrieval_test(n_queries=10, top_k=10, output_path="retrieval_test_results.jpg", 
+                      remove_duplicates=True, similarity_threshold=0.98):
     """
     Run the retrieval test.
     
@@ -197,6 +235,8 @@ def run_retrieval_test(n_queries=10, top_k=10, output_path="retrieval_test_resul
         n_queries: Number of random queries to test
         top_k: Number of top results to retrieve per query
         output_path: Path to save the visualization
+        remove_duplicates: Whether to remove duplicate results
+        similarity_threshold: Similarity threshold for duplicate detection (0-1, higher = stricter)
     """
     print("="*60)
     print("Image Retrieval Visual Test")
@@ -240,6 +280,14 @@ def run_retrieval_test(n_queries=10, top_k=10, output_path="retrieval_test_resul
     for i, query_path in enumerate(query_paths, 1):
         print(f"   Searching {i}/{len(query_paths)}: {os.path.basename(query_path)}")
         results = search_engine.search(query_path, k=top_k)
+        
+        # Remove duplicate results if enabled
+        if remove_duplicates and results:
+            original_count = len(results)
+            results = remove_duplicate_results(results, similarity_threshold)
+            if len(results) < original_count:
+                print(f"      Removed {original_count - len(results)} duplicate(s)")
+        
         search_results.append(results)
         
         if results:
@@ -291,6 +339,10 @@ if __name__ == "__main__":
                        help="Output image path (default: retrieval_test_results.jpg)")
     parser.add_argument("--seed", "-s", type=int, default=None,
                        help="Random seed for reproducibility (default: None)")
+    parser.add_argument("--threshold", "-t", type=float, default=0.98,
+                       help="Similarity threshold for duplicate detection (0-1, default: 0.98)")
+    parser.add_argument("--no-dedup", action="store_true",
+                       help="Disable duplicate removal (default: enabled)")
     
     args = parser.parse_args()
     
@@ -303,5 +355,7 @@ if __name__ == "__main__":
     run_retrieval_test(
         n_queries=args.queries,
         top_k=args.topk,
-        output_path=args.output
+        output_path=args.output,
+        remove_duplicates=not args.no_dedup,
+        similarity_threshold=args.threshold
     )
