@@ -121,8 +121,15 @@ def create_retrieval_grid(query_paths, search_results, output_path, top_k=10):
         # Load and add query image
         x_offset = 20
         query_img = load_and_resize_image(query_path, (img_size, img_size))
-        query_img = add_label(query_img, f"Query {query_idx + 1}", position='top', 
-                             color=(255, 255, 255), bg_color=(0, 100, 200))
+        
+        # Add label for filename and id below the image
+        filename = os.path.basename(query_path)
+        query_id = query_idx + 1
+        label_text = f"{filename}\nID: {query_id}"
+        query_img = add_label(query_img, f"Query {query_id}", position='top', 
+                              color=(255, 255, 255), bg_color=(0, 100, 200))
+        query_img = add_label(query_img, label_text, position=(5, img_size - 30),
+                              color=(0, 0, 0), bg_color=(255, 255, 255))
         
         # Add border to query image
         bordered_query = Image.new('RGB', (img_size + 4, img_size + 4), (0, 100, 200))
@@ -156,6 +163,13 @@ def create_retrieval_grid(query_paths, search_results, output_path, top_k=10):
             
             result_img = add_label(result_img, label, position='top',
                                   color=(50, 50, 50), bg_color=(255, 255, 200))
+            
+            # Add filename and id label below image
+            filename = os.path.basename(result_path)
+            result_id = rank + 1
+            file_label = f"{filename}\nID: {result_id}"
+            result_img = add_label(result_img, file_label, position=(5, img_size - 30),
+                                  color=(0, 0, 0), bg_color=(255, 255, 255))
             
             # Add score at bottom
             score_text = f"{score:.3f}"
