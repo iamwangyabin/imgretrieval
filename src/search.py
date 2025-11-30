@@ -2,10 +2,11 @@ import os
 import pickle
 import numpy as np
 import faiss
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Set
 from src.config import INDEX_PATH, DATA_DIR, FEATURE_DIM
 from src.database import get_all_features
 from src.model import FeatureExtractor
+from src.deduplication import FilterListGenerator
 
 
 class SearchEngine:
@@ -21,8 +22,13 @@ class SearchEngine:
         if os.path.exists(INDEX_PATH):
             self.load_index()
     
-    def build_index(self):
-        """Build FAISS index from database features."""
+    def build_index(self, apply_filter: bool = True):
+        """
+        Build FAISS index from database features.
+        
+        Args:
+            apply_filter: 是否应用过滤列表排除重复图片
+        """
         print("Loading features from database...")
         paths, vectors_bytes = get_all_features()
         
@@ -32,11 +38,29 @@ class SearchEngine:
         
         print(f"Found {len(paths)} processed images.")
         
-        # Convert bytes back to numpy arrays
+        # Load filter list if apply_filter is True
+        filtered_set = set()
+        if apply_filter:
+            filtered_set = FilterListGenerator.load_filter_list()
+            if filtered_set:
+                print(f"Loaded filter list: {len(filtered_set)} images to exclude")
+        
+        # Convert bytes back to numpy arrays, filtering if needed
         vectors = []
-        for vec_bytes in vectors_bytes:
+        filtered_paths = []
+        
+        for i, (path, vec_bytes) in enumerate(zip(paths, vectors_bytes)):
+            if apply_filter and path in filtered_set:
+                print(f"  Excluding duplicate: {path}")
+                continue
+            
             vec = np.frombuffer(vec_bytes, dtype=np.float32)
             vectors.append(vec)
+            filtered_paths.append(path)
+        
+        if not vectors:
+            print("No vectors left after filtering. Cannot build index.")
+            return False
         
         vectors = np.array(vectors, dtype=np.float32)
         
@@ -44,14 +68,17 @@ class SearchEngine:
         if vectors.shape[1] != FEATURE_DIM:
             print(f"Warning: Feature dimension mismatch. Expected {FEATURE_DIM}, got {vectors.shape[1]}")
         
+        excluded_count = len(paths) - len(vectors)
         print(f"Building FAISS index with {len(vectors)} vectors of dimension {vectors.shape[1]}...")
+        if excluded_count > 0:
+            print(f"  ({excluded_count} duplicate images excluded by filter)")
         
         # Create FAISS index
         # Using IndexFlatIP for exact inner product search (equivalent to cosine similarity for normalized vectors)
         self.index = faiss.IndexFlatIP(vectors.shape[1])
         self.index.add(vectors)
         
-        self.image_paths = paths
+        self.image_paths = filtered_paths
         
         print(f"Index built successfully. Total vectors: {self.index.ntotal}")
         return True
