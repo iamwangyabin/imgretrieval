@@ -4,9 +4,6 @@ from src.database import init_db, get_stats
 from src.scanner import scan_directory
 from src.processor import process_images
 from src.search import SearchEngine
-from src.deduplication import (
-    DuplicateDetector, DuplicateSelector, FilterListGenerator, DeduplicationReport
-)
 
 def main():
     parser = argparse.ArgumentParser(description="Local Image Retrieval System CLI")
@@ -32,11 +29,6 @@ def main():
     
     # Stats command
     parser_stats = subparsers.add_parser("stats", help="Show system statistics")
-    
-    # Deduplicate command
-    parser_dedup = subparsers.add_parser("deduplicate", help="Detect and filter duplicate images")
-    parser_dedup.add_argument("--threshold", type=float, default=0.95,
-                              help="Similarity threshold for detecting duplicates (default: 0.95)")
     
     args = parser.parse_args()
     
@@ -160,46 +152,6 @@ def main():
             print(f"Error sampling feature: {e}")
         finally:
             conn.close()
-    
-    elif args.command == "deduplicate":
-        print("=== 开始图片去重复流程 ===\n")
-        
-        # 第一步：检测重复图片组
-        print("【第一步】检测重复图片组")
-        detector = DuplicateDetector(similarity_threshold=args.threshold)
-        
-        if not detector.load_features_from_db():
-            print("错误：无法加载特征向量")
-            return
-        
-        if not detector.build_faiss_index():
-            print("错误：无法构建FAISS索引")
-            return
-        
-        duplicate_groups_dict = detector.find_duplicate_groups()
-        merged_groups = detector.merge_duplicate_groups(duplicate_groups_dict)
-        
-        if not merged_groups:
-            print("未检测到重复图片，流程结束。")
-            return
-        
-        # 第二步：筛选组内最佳图片保留
-        print("\n【第二步】筛选组内最佳图片保留")
-        selector = DuplicateSelector(detector.image_paths)
-        retained_paths, filtered_paths = selector.select_best_from_groups(merged_groups)
-        
-        # 第三步：生成过滤列表
-        print("\n【第三步】生成过滤列表和报告")
-        FilterListGenerator.generate_filter_list(filtered_paths)
-        DeduplicationReport.generate_report(merged_groups, detector.image_paths, 
-                                           filtered_paths, retained_paths)
-        
-        print("\n=== 去重复流程完成 ===")
-        print(f"总图片数: {len(detector.image_paths)}")
-        print(f"重复组数: {len(merged_groups)}")
-        print(f"保留图片: {len(retained_paths)}")
-        print(f"待过滤图片: {len(filtered_paths)}")
-        print("\n提示：下次运行 'build-index' 命令时，过滤列表会自动应用")
         
     else:
         parser.print_help()
