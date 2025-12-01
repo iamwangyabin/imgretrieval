@@ -27,6 +27,31 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Fallback if tqdm is not installed
+    class tqdm:
+        def __init__(self, iterable=None, total=None, desc=None, **kwargs):
+            self.iterable = iterable
+            self.total = total
+            self.desc = desc
+            self.count = 0
+        
+        def __iter__(self):
+            for item in self.iterable:
+                self.count += 1
+                yield item
+        
+        def update(self, n=1):
+            self.count += n
+        
+        def __enter__(self):
+            return self
+        
+        def __exit__(self, *args):
+            pass
+
 
 def get_source_image_path(filename, source_dir):
     """
@@ -152,84 +177,75 @@ def organize_images(csv_file, image_source_dir, output_base_dir):
     source_dir = Path(image_source_dir)
     output_dir = Path(output_base_dir)
     
+    total_files = len(image_records)
     total_copied = 0
     total_failed = 0
     
-    print(f"{'='*80}")
-    print(f"开始组织图片")
-    print(f"{'='*80}")
-    print(f"源目录: {source_dir}")
-    print(f"输出目录: {output_dir}")
-    print(f"找到 {len(image_records)} 张图片\n")
+    print(f"\n开始组织图片...")
+    print(f"找到 {total_files} 张图片\n")
     
-    for base_model in sorted(hierarchy.keys()):
-        models = hierarchy[base_model]
-        
-        # Replace invalid characters in directory names
-        safe_base_model = sanitize_path(base_model)
-        base_model_path = output_dir / safe_base_model
-        
-        print(f"\n📁 基础模型: {base_model}")
-        
-        for model_name in sorted(models.keys()):
-            filenames = models[model_name]
+    # Create progress bar
+    with tqdm(total=total_files, desc="复制进度", unit="张") as pbar:
+        for base_model in sorted(hierarchy.keys()):
+            models = hierarchy[base_model]
             
             # Replace invalid characters in directory names
-            safe_model_name = sanitize_path(model_name)
-            model_path = base_model_path / safe_model_name
+            safe_base_model = sanitize_path(base_model)
+            base_model_path = output_dir / safe_base_model
             
-            # Create directory if it doesn't exist
-            model_path.mkdir(parents=True, exist_ok=True)
-            print(f"  📂 模型: {model_name}")
-            print(f"     路径: {model_path}")
-            print(f"     包含 {len(filenames)} 张图片")
-            
-            # Copy images
-            for filename in filenames:
-                # 根据三层级目录结构构造源路径
-                source_file = get_source_image_path(filename, source_dir)
+            for model_name in sorted(models.keys()):
+                filenames = models[model_name]
                 
-                if source_file is None:
-                    print(f"     ✗ 无效文件名: {filename}")
-                    total_failed += 1
-                    continue
+                # Replace invalid characters in directory names
+                safe_model_name = sanitize_path(model_name)
+                model_path = base_model_path / safe_model_name
                 
-                dest_file = model_path / filename
+                # Create directory if it doesn't exist
+                model_path.mkdir(parents=True, exist_ok=True)
                 
-                try:
-                    if source_file.exists():
-                        shutil.copy2(source_file, dest_file)
-                        print(f"     ✓ 复制: {filename}")
-                        total_copied += 1
-                        
-                        # 同时复制对应的 JSON 文件（如果存在）
-                        name_without_ext = Path(filename).stem
-                        json_filename = f"{name_without_ext}.json"
-                        source_json_file = get_source_image_path(json_filename, source_dir)
-                        
-                        if source_json_file and source_json_file.exists():
-                            dest_json_file = model_path / json_filename
-                            try:
-                                shutil.copy2(source_json_file, dest_json_file)
-                                print(f"     ✓ 复制 JSON: {json_filename}")
-                            except Exception as json_err:
-                                print(f"     ✗ 复制 JSON 失败 {json_filename}: {json_err}")
-                    else:
-                        print(f"     ✗ 源文件不存在: {source_file}")
+                # Copy images
+                for filename in filenames:
+                    # 根据三层级目录结构构造源路径
+                    source_file = get_source_image_path(filename, source_dir)
+                    
+                    if source_file is None:
                         total_failed += 1
-                except Exception as e:
-                    print(f"     ✗ 复制失败 {filename}: {e}")
-                    total_failed += 1
+                        pbar.update(1)
+                        continue
+                    
+                    dest_file = model_path / filename
+                    
+                    try:
+                        if source_file.exists():
+                            shutil.copy2(source_file, dest_file)
+                            total_copied += 1
+                            
+                            # 同时复制对应的 JSON 文件（如果存在）
+                            name_without_ext = Path(filename).stem
+                            json_filename = f"{name_without_ext}.json"
+                            source_json_file = get_source_image_path(json_filename, source_dir)
+                            
+                            if source_json_file and source_json_file.exists():
+                                dest_json_file = model_path / json_filename
+                                try:
+                                    shutil.copy2(source_json_file, dest_json_file)
+                                except Exception:
+                                    pass
+                        else:
+                            total_failed += 1
+                    except Exception:
+                        total_failed += 1
+                    
+                    pbar.update(1)
     
     # Print summary
-    print(f"\n{'='*80}")
-    print(f"图片组织完成!")
-    print(f"{'='*80}")
+    print(f"\n{'='*60}")
+    print(f"图片组织完成！")
+    print(f"{'='*60}")
     print(f"输出目录: {output_dir}")
     print(f"成功复制: {total_copied} 张图片")
     print(f"复制失败: {total_failed} 张图片")
-    print(f"\n目录结构:")
-    print_tree(output_dir)
+    print(f"{'='*60}\n")
 
 
 def print_tree(directory, prefix="", max_depth=3, current_depth=0):
