@@ -202,6 +202,7 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
                 filename = row.get('filename', '').strip()
                 base_model = row.get('base_model', 'Unknown').strip()
                 model_name = row.get('model_name', 'Unknown').strip()
+                model_type = row.get('model_type', 'Unknown').strip()
                 
                 if not filename:
                     continue
@@ -211,11 +212,22 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
                     base_model = 'Unknown'
                 if not model_name or model_name.lower() == 'nan':
                     model_name = 'Unknown'
+                if not model_type or model_type.lower() == 'nan':
+                    model_type = 'Unknown'
                 
-                hierarchy[base_model][model_name].append(filename)
+                # 如果是LORA，使用base_model作为二级目录；如果是Checkpoint，使用model_name
+                if model_type.upper() == 'LORA':
+                    # LORA应该归类到其base_model下
+                    effective_model_name = base_model
+                else:
+                    # Checkpoint使用自己的model_name
+                    effective_model_name = model_name
+                
+                hierarchy[base_model][effective_model_name].append(filename)
                 image_records[filename] = {
                     'base_model': base_model,
-                    'model_name': model_name
+                    'model_name': model_name,
+                    'model_type': model_type
                 }
     
     except FileNotFoundError:
