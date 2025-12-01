@@ -130,7 +130,7 @@ def sanitize_path(path_str):
 def organize_images(csv_file, image_source_dir, output_base_dir):
     """
     读取 CSV 文件，根据图片名称查找对应的 model name 和 base model name，
-    然后将图片从三层级目录结构复制到 base_model/model_name/ 目录下。
+    然后将图片从三层级目录结构移动到 base_model/model_name/ 目录下。
     
     Args:
         csv_file: Path to CSV file containing image metadata
@@ -185,7 +185,7 @@ def organize_images(csv_file, image_source_dir, output_base_dir):
     print(f"找到 {total_files} 张图片\n")
     
     # Create progress bar
-    with tqdm(total=total_files, desc="复制进度", unit="张") as pbar:
+    with tqdm(total=total_files, desc="移动进度", unit="张") as pbar:
         for base_model in sorted(hierarchy.keys()):
             models = hierarchy[base_model]
             
@@ -217,10 +217,10 @@ def organize_images(csv_file, image_source_dir, output_base_dir):
                     
                     try:
                         if source_file.exists():
-                            shutil.copy2(source_file, dest_file)
+                            shutil.move(source_file, dest_file)
                             total_copied += 1
                             
-                            # 同时复制对应的 JSON 文件（如果存在）
+                            # 同时移动对应的 JSON 文件（如果存在）
                             name_without_ext = Path(filename).stem
                             json_filename = f"{name_without_ext}.json"
                             source_json_file = get_source_image_path(json_filename, source_dir)
@@ -228,7 +228,7 @@ def organize_images(csv_file, image_source_dir, output_base_dir):
                             if source_json_file and source_json_file.exists():
                                 dest_json_file = model_path / json_filename
                                 try:
-                                    shutil.copy2(source_json_file, dest_json_file)
+                                    shutil.move(source_json_file, dest_json_file)
                                 except Exception:
                                     pass
                         else:
@@ -243,8 +243,8 @@ def organize_images(csv_file, image_source_dir, output_base_dir):
     print(f"图片组织完成！")
     print(f"{'='*60}")
     print(f"输出目录: {output_dir}")
-    print(f"成功复制: {total_copied} 张图片")
-    print(f"复制失败: {total_failed} 张图片")
+    print(f"成功移动: {total_copied} 张图片")
+    print(f"移动失败: {total_failed} 张图片")
     print(f"{'='*60}\n")
 
 
