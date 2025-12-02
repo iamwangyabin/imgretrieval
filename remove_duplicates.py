@@ -37,6 +37,12 @@ except ImportError:
     print("请运行：pip install pandas")
     sys.exit(1)
 
+try:
+    from visualize_duplicates import visualize_from_duplicates_info
+    VISUALIZE_AVAILABLE = True
+except ImportError:
+    VISUALIZE_AVAILABLE = False
+
 
 # ================= 配置区域 =================
 # 这些参数可根据需要调整
@@ -55,6 +61,8 @@ KEEP_STRATEGY = "first"       # 保留策略：
                               # "alphabetical" - 按字母顺序保留第一个
 
 SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp', '.tiff'}
+VISUALIZE = True              # 是否生成可视化图片
+VISUALIZATION_OUTPUT = "duplicates_visualization.jpg"  # 可视化输出路径
 # ===========================================
 
 
@@ -232,6 +240,14 @@ def remove_duplicates(input_dir, threshold=THRESHOLD, dry_run=DRY_RUN,
     
     print(f"  ✓ 发现 {len(duplicate_groups)} 个重复组")
     print(f"  ✓ 共 {len(files_to_delete)} 个文件待删除")
+    
+    # 生成可视化（步骤 3.5）
+    if VISUALIZE and VISUALIZE_AVAILABLE and len(duplicate_groups) > 0:
+        print(f"\n[步骤 3.5/4] 生成可视化图片...")
+        try:
+            visualize_from_duplicates_info(duplicate_groups, VISUALIZATION_OUTPUT)
+        except Exception as e:
+            print(f"  警告：生成可视化失败 - {e}")
     
     # 4. 显示详细信息并执行删除
     print(f"\n[步骤 4/4] 重复组详情及删除操作...")
