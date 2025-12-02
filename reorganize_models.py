@@ -41,7 +41,7 @@ def count_items_in_folder(folder_path):
 
 def copy_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容复制到目标文件夹（使用find命令避免参数列表过长）。
+    将源文件夹中的所有内容复制到目标文件夹，仅复制内容而不创建子文件夹。
 
     Args:
         src_dir: 源文件夹路径
@@ -66,19 +66,26 @@ def copy_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        # 使用 find 命令避免 "Argument list too long" 错误
-        # find 不会受到 ARG_MAX 限制
-        cmd = f'find "{src_path}" -maxdepth 1 ! -name . | xargs -I {{}} cp -r {{}} "{dest_path}/"'
-        
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            # 复制成功，返回复制的项目数
-            return item_count, 0, []
-        else:
-            # 复制失败，返回错误信息
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            return 0, item_count, [error_msg]
+        success_count = 0
+        fail_count = 0
+        fail_list = []
+
+        # 逐个复制源文件夹中的每个项目，确保复制的是内容而不是整个文件夹
+        for item in items:
+            dest_item = dest_path / item.name
+            try:
+                if item.is_dir():
+                    # 对于子目录，使用 dirs_exist_ok=True 来合并内容，避免嵌套
+                    shutil.copytree(item, dest_item, dirs_exist_ok=True)
+                else:
+                    # 对于文件，直接复制（如果已存在则覆盖）
+                    shutil.copy2(item, dest_item)
+                success_count += 1
+            except Exception as e:
+                fail_count += 1
+                fail_list.append(f"复制 {item.name} 失败: {str(e)}")
+
+        return success_count, fail_count, fail_list
 
     except Exception as e:
         print(f"警告：复制文件夹 {src_dir} 时出错: {e}")
@@ -87,7 +94,7 @@ def copy_folder_contents(src_dir, dest_dir):
 
 def move_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容移动到目标文件夹（使用find命令避免参数列表过长）。
+    将源文件夹中的所有内容移动到目标文件夹，仅移动内容而不创建子文件夹。
 
     Args:
         src_dir: 源文件夹路径
@@ -112,19 +119,28 @@ def move_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        # 使用 find 命令避免 "Argument list too long" 错误
-        # find 不会受到 ARG_MAX 限制
-        cmd = f'find "{src_path}" -maxdepth 1 ! -name . | xargs -I {{}} mv {{}} "{dest_path}/"'
-        
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            # 移动成功，返回移动的项目数
-            return item_count, 0, []
-        else:
-            # 移动失败，返回错误信息
-            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            return 0, item_count, [error_msg]
+        success_count = 0
+        fail_count = 0
+        fail_list = []
+
+        # 逐个移动源文件夹中的每个项目，确保移动的是内容而不是整个文件夹
+        for item in items:
+            dest_item = dest_path / item.name
+            try:
+                # 如果目标已存在，先删除它，然后再移动
+                if dest_item.exists():
+                    if dest_item.is_dir():
+                        shutil.rmtree(dest_item)
+                    else:
+                        dest_item.unlink()
+                
+                shutil.move(str(item), str(dest_item))
+                success_count += 1
+            except Exception as e:
+                fail_count += 1
+                fail_list.append(f"移动 {item.name} 失败: {str(e)}")
+
+        return success_count, fail_count, fail_list
 
     except Exception as e:
         print(f"警告：移动文件夹 {src_dir} 时出错: {e}")
