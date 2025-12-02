@@ -52,7 +52,7 @@ THRESHOLD = 0.95              # 相似度阈值 (0-1)
                               # 0.90 = 相似（可能包含连拍图）
                               # 0.85 = 比较相似（可能有不同角度）
 
-DRY_RUN = True                # 设置为 True 进行模拟运行
+DRY_RUN = False                # 设置为 True 进行模拟运行
                               # 设置为 False 时会实际删除文件
 
 KEEP_STRATEGY = "first"       # 保留策略：
