@@ -41,8 +41,8 @@ def count_items_in_folder(folder_path):
 
 def copy_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容复制到目标文件夹，仅复制内容而不创建子文件夹。
-
+    使用系统 cp 命令将源文件夹中的所有内容复制到目标文件夹，保留符号链接。
+    
     Args:
         src_dir: 源文件夹路径
         dest_dir: 目标文件夹路径
@@ -57,7 +57,6 @@ def copy_folder_contents(src_dir, dest_dir):
         return 0, 0, []
 
     try:
-        # 计算要复制的项目数
         items = list(src_path.iterdir())
         item_count = len(items)
         
@@ -66,26 +65,17 @@ def copy_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        success_count = 0
-        fail_count = 0
-        fail_list = []
-
-        # 逐个复制源文件夹中的每个项目，确保复制的是内容而不是整个文件夹
-        for item in items:
-            dest_item = dest_path / item.name
-            try:
-                if item.is_dir():
-                    # 对于子目录，使用 dirs_exist_ok=True 来合并内容，避免嵌套
-                    shutil.copytree(item, dest_item, dirs_exist_ok=True)
-                else:
-                    # 对于文件，直接复制（如果已存在则覆盖）
-                    shutil.copy2(item, dest_item)
-                success_count += 1
-            except Exception as e:
-                fail_count += 1
-                fail_list.append(f"复制 {item.name} 失败: {str(e)}")
-
-        return success_count, fail_count, fail_list
+        # 使用 find + xargs + cp 保留符号链接
+        # -P 选项保留符号链接，-r 递归复制
+        cmd = f'find "{src_path}" -maxdepth 1 ! -name . -print0 | xargs -0 -I {{}} cp -P -r {{}} "{dest_path}/"'
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return item_count, 0, []
+        else:
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            return 0, item_count, [error_msg]
 
     except Exception as e:
         print(f"警告：复制文件夹 {src_dir} 时出错: {e}")
@@ -94,8 +84,8 @@ def copy_folder_contents(src_dir, dest_dir):
 
 def move_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容移动到目标文件夹，仅移动内容而不创建子文件夹。
-
+    使用系统 mv 命令将源文件夹中的所有内容移动到目标文件夹，保留符号链接。
+    
     Args:
         src_dir: 源文件夹路径
         dest_dir: 目标文件夹路径
@@ -110,7 +100,6 @@ def move_folder_contents(src_dir, dest_dir):
         return 0, 0, []
 
     try:
-        # 计算要移动的项目数
         items = list(src_path.iterdir())
         item_count = len(items)
         
@@ -119,28 +108,16 @@ def move_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        success_count = 0
-        fail_count = 0
-        fail_list = []
-
-        # 逐个移动源文件夹中的每个项目，确保移动的是内容而不是整个文件夹
-        for item in items:
-            dest_item = dest_path / item.name
-            try:
-                # 如果目标已存在，先删除它，然后再移动
-                if dest_item.exists():
-                    if dest_item.is_dir():
-                        shutil.rmtree(dest_item)
-                    else:
-                        dest_item.unlink()
-                
-                shutil.move(str(item), str(dest_item))
-                success_count += 1
-            except Exception as e:
-                fail_count += 1
-                fail_list.append(f"移动 {item.name} 失败: {str(e)}")
-
-        return success_count, fail_count, fail_list
+        # 使用 find + xargs + mv
+        cmd = f'find "{src_path}" -maxdepth 1 ! -name . -print0 | xargs -0 -I {{}} mv {{}} "{dest_path}/"'
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return item_count, 0, []
+        else:
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            return 0, item_count, [error_msg]
 
     except Exception as e:
         print(f"警告：移动文件夹 {src_dir} 时出错: {e}")
@@ -305,7 +282,8 @@ def reorganize_models(source_dir, rules_file, output_dir=None, dry_run=False):
     total_fail = 0
     all_fail_items = []
 
-    with tqdm(total=len(to_merge), desc="合并进度", unit="组") as pbar:
+    with tqdm(total=len(to_merge) + len(to_keep), desc="处理进度", unit="组") as pbar:
+        # 处理需要合并的文件夹
         for target_name, original_folders in to_merge.items():
             target_path = work_path / target_name
             target_path.mkdir(parents=True, exist_ok=True)
@@ -317,6 +295,25 @@ def reorganize_models(source_dir, rules_file, output_dir=None, dry_run=False):
                 total_fail += fail
                 all_fail_items.extend(fail_list)
 
+            pbar.update(1)
+        
+        # 处理不需要合并的文件夹：原封不动复制到目标文件夹
+        for original_name, folder_path in to_keep:
+            dest_folder = work_path / original_name
+            try:
+                # 使用 cp -P -r 保留符号链接并递归复制整个文件夹
+                cmd = 'cp -P -r "{}" "{}"'.format(folder_path, dest_folder)
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if result.returncode == 0:
+                    total_success += count_items_in_folder(folder_path)
+                else:
+                    error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                    total_fail += 1
+                    all_fail_items.append("复制文件夹 {} 失败: {}".format(original_name, error_msg))
+            except Exception as e:
+                total_fail += 1
+                all_fail_items.append("复制文件夹 {} 异常: {}".format(original_name, str(e)))
+            
             pbar.update(1)
 
     # 清理空文件夹（仅清理工作目录中的空文件夹，不触及源目录）
