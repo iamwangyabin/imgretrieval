@@ -299,35 +299,27 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
                     symlink_tasks.append((source_file, dest_file))
     
     print(f"准备了 {len(symlink_tasks)} 个符号链接任务\n")
-    print(f"开始创建符号链接（使用 {num_workers} 个线程）...\n")
+    print(f"开始创建符号链接（单线程模式）...\n")
     
-    # 使用线程池并行创建符号链接
+    # 单线程顺序创建符号链接
     total_linked = 0
     total_failed = 0
     
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        # 提交所有任务
-        futures = {
-            executor.submit(create_symlink_task, source, dest, file_index): (source, dest)
-            for source, dest in symlink_tasks
-        }
-        
-        # 使用进度条处理完成的任务
-        with tqdm(total=len(symlink_tasks), desc="符号链接创建进度", unit="个", disable=False) as pbar:
-            for future in as_completed(futures):
-                try:
-                    success, filename = future.result()
-                    if success:
-                        total_linked += 1
-                        pbar.set_postfix({'当前': filename, '状态': '✓'})
-                    else:
-                        total_failed += 1
-                        pbar.set_postfix({'当前': filename, '状态': '✗'})
-                except Exception as e:
+    with tqdm(total=len(symlink_tasks), desc="符号链接创建进度", unit="个", disable=False) as pbar:
+        for source, dest in symlink_tasks:
+            try:
+                success, filename = create_symlink_task(source, dest, file_index)
+                if success:
+                    total_linked += 1
+                    pbar.set_postfix({'当前': filename, '状态': '✓'})
+                else:
                     total_failed += 1
-                    pbar.set_postfix({'状态': '错误'})
-                
-                pbar.update(1)
+                    pbar.set_postfix({'当前': filename, '状态': '✗'})
+            except Exception as e:
+                total_failed += 1
+                pbar.set_postfix({'状态': '错误'})
+            
+            pbar.update(1)
     
     # 打印摘要
     print(f"\n{'='*60}")
