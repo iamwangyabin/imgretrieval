@@ -188,13 +188,12 @@ def remove_duplicates(input_dir, threshold=THRESHOLD, dry_run=DRY_RUN,
             # 初始化 fastdup
             fd = fastdup.create(
                 work_dir=work_dir,
-                input_dir=input_dir,
-                verbose=False
+                input_dir=input_dir
             )
             
             # 运行分析
             print(f"  处理中（使用阈值 {threshold}）...")
-            fd.run(cc_threshold=threshold, verbose=False)
+            fd.run(cc_threshold=threshold)
             
             # 获取重复组信息
             duplicates_df = fd.connected_components()
