@@ -41,7 +41,7 @@ def count_items_in_folder(folder_path):
 
 def copy_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容复制到目标文件夹（使用OS级命令批量复制）。
+    将源文件夹中的所有内容复制到目标文件夹（使用find命令避免参数列表过长）。
 
     Args:
         src_dir: 源文件夹路径
@@ -66,9 +66,9 @@ def copy_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        # 使用系统级命令 cp 一次性复制所有内容（避免逐个文件的Python循环）
-        # cp -r "source"/* "dest"/ 会将source下的所有文件和文件夹复制到dest
-        cmd = f'cp -r "{src_path}"/* "{dest_path}/"'
+        # 使用 find 命令避免 "Argument list too long" 错误
+        # find 不会受到 ARG_MAX 限制
+        cmd = f'find "{src_path}" -maxdepth 1 ! -name . | xargs -I {{}} cp -r {{}} "{dest_path}/"'
         
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
@@ -87,7 +87,7 @@ def copy_folder_contents(src_dir, dest_dir):
 
 def move_folder_contents(src_dir, dest_dir):
     """
-    将源文件夹中的所有内容移动到目标文件夹（使用OS级命令批量移动）。
+    将源文件夹中的所有内容移动到目标文件夹（使用find命令避免参数列表过长）。
 
     Args:
         src_dir: 源文件夹路径
@@ -112,9 +112,9 @@ def move_folder_contents(src_dir, dest_dir):
 
         dest_path.mkdir(parents=True, exist_ok=True)
 
-        # 使用系统级命令 mv 一次性移动所有内容（避免逐个文件的Python循环）
-        # mv "source"/* "dest"/ 会将source下的所有文件和文件夹移动到dest
-        cmd = f'mv "{src_path}"/* "{dest_path}/"'
+        # 使用 find 命令避免 "Argument list too long" 错误
+        # find 不会受到 ARG_MAX 限制
+        cmd = f'find "{src_path}" -maxdepth 1 ! -name . | xargs -I {{}} mv {{}} "{dest_path}/"'
         
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
