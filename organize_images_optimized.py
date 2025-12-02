@@ -313,16 +313,19 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
         }
         
         # 使用进度条处理完成的任务
-        with tqdm(total=len(symlink_tasks), desc="符号链接创建进度", unit="个") as pbar:
+        with tqdm(total=len(symlink_tasks), desc="符号链接创建进度", unit="个", disable=False) as pbar:
             for future in as_completed(futures):
                 try:
                     success, filename = future.result()
                     if success:
                         total_linked += 1
+                        pbar.set_postfix({'当前': filename, '状态': '✓'})
                     else:
                         total_failed += 1
-                except Exception:
+                        pbar.set_postfix({'当前': filename, '状态': '✗'})
+                except Exception as e:
                     total_failed += 1
+                    pbar.set_postfix({'状态': '错误'})
                 
                 pbar.update(1)
     
