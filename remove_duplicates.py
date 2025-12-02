@@ -196,7 +196,9 @@ def remove_duplicates(input_dir, threshold=THRESHOLD, dry_run=DRY_RUN,
             fd.run(cc_threshold=threshold)
             
             # 获取重复组信息
-            duplicates_df = fd.connected_components()
+            result = fd.connected_components()
+            # connected_components() 返回一个元组，第一个元素是DataFrame
+            duplicates_df = result[0] if isinstance(result, tuple) else result
             
             if duplicates_df.empty or len(duplicates_df) == 0:
                 print(f"  ✓ 分析完成：未发现重复图片")
