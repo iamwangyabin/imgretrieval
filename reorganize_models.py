@@ -160,14 +160,15 @@ def cleanup_empty_folders(root_dir, max_depth=5):
     remove_empty_dirs(root_path)
 
 
-def reorganize_models(source_dir, rules_file, operation_mode='move', dry_run=False):
+def reorganize_models(source_dir, rules_file, output_dir=None, dry_run=False):
     """
     根据合并规则重排模型文件夹。
 
     Args:
         source_dir: 源目录路径（如 sd1.5）
         rules_file: 合并规则JSON文件路径
-        operation_mode: 'move'（默认，合并后删除源文件夹）或 'copy'（保留源文件夹）
+        output_dir: 输出目录路径。如果指定，重排结果将放在此目录下，原始文件不会被修改。
+                   如果不指定，将在源目录下执行操作（保留原始文件，使用复制模式）
         dry_run: 如果为 True，只显示将要执行的操作，不实际执行
     """
     source_path = Path(source_dir)
@@ -179,6 +180,16 @@ def reorganize_models(source_dir, rules_file, operation_mode='move', dry_run=Fal
     if not source_path.is_dir():
         print(f"错误：'{source_dir}' 不是一个目录")
         sys.exit(1)
+
+    # 确定工作目录
+    if output_dir:
+        work_path = Path(output_dir)
+        work_path.mkdir(parents=True, exist_ok=True)
+        print(f"输出目录: {output_dir}")
+        print(f"原始源目录将被保留: {source_dir}\n")
+    else:
+        work_path = source_path
+        print(f"工作目录: {source_dir}（原始文件保留，使用复制模式）\n")
 
     # 加载合并规则
     print(f"正在加载合并规则文件: {rules_file}")
@@ -222,7 +233,9 @@ def reorganize_models(source_dir, rules_file, operation_mode='move', dry_run=Fal
     print("=" * 70)
     print("重排计划摘要")
     print("=" * 70)
-    print(f"操作模式: {operation_mode.upper()}")
+    print(f"源目录: {source_dir}")
+    print(f"工作目录: {work_path}")
+    print(f"操作模式: 复制（原始文件保留）")
     print(f"Dry Run: {'是' if dry_run else '否'}\n")
 
     if to_merge:
@@ -270,43 +283,36 @@ def reorganize_models(source_dir, rules_file, operation_mode='move', dry_run=Fal
         print("操作已取消。")
         return
 
-    print(f"\n开始执行 {operation_mode} 操作...\n")
+    print(f"\n开始执行复制操作到 {work_path}...\n")
 
-    operation_func = move_folder_contents if operation_mode == 'move' else copy_folder_contents
     total_success = 0
     total_fail = 0
     all_fail_items = []
 
     with tqdm(total=len(to_merge), desc="合并进度", unit="组") as pbar:
         for target_name, original_folders in to_merge.items():
-            target_path = source_path / target_name
+            target_path = work_path / target_name
             target_path.mkdir(parents=True, exist_ok=True)
 
             for original_name, original_path in original_folders:
-                success, fail, fail_list = operation_func(str(original_path), str(target_path))
+                # 始终使用复制操作，不删除任何源文件
+                success, fail, fail_list = copy_folder_contents(str(original_path), str(target_path))
                 total_success += success
                 total_fail += fail
                 all_fail_items.extend(fail_list)
 
-                # 如果是移动模式，删除源文件夹（确保合并后源文件夹消失）
-                if operation_mode == 'move':
-                    try:
-                        if original_path.exists():
-                            # 强制删除源文件夹及其所有内容
-                            shutil.rmtree(str(original_path))
-                    except Exception as e:
-                        print(f"警告：无法删除源文件夹 {original_name}: {e}")
-
             pbar.update(1)
 
-    # 清理空文件夹
+    # 清理空文件夹（仅清理工作目录中的空文件夹，不触及源目录）
     print("\n正在清理空文件夹...")
-    cleanup_empty_folders(source_dir)
+    cleanup_empty_folders(str(work_path))
 
     # 打印最终统计
     print("\n" + "=" * 70)
     print("重排完成！")
     print("=" * 70)
+    print(f"源目录（保留不动）: {source_dir}")
+    print(f"输出目录: {work_path}")
     print(f"成功处理: {total_success} 项")
     print(f"处理失败: {total_fail} 项")
 
@@ -329,13 +335,18 @@ def main():
         print("  rules_file: 合并规则JSON文件路径（如 ./merge_rules.json）")
         print()
         print("可选参数:")
-        print("  --mode move    使用移动模式（默认，源文件夹被合并后会删除）")
-        print("  --mode copy    使用复制模式（保留源文件夹，仅复制内容）")
-        print("  --dry-run      仅显示将要执行的操作，不实际执行")
+        print("  --output <dir>  输出目录。指定时，重排结果将放在此目录，源文件保持不动")
+        print("                  不指定时，使用源目录本身（仍然保留原始文件，使用复制模式）")
+        print("  --dry-run       仅显示将要执行的操作，不实际执行")
         print()
         print("示例:")
+        print("  # 在新目录中输出重排结果（推荐，源文件完全保留）")
+        print("  python3 reorganize_models.py ./sd1.5 ./merge_rules.json --output ./sd1.5_organized")
+        print()
+        print("  # 在源目录中输出，但保留原始文件")
         print("  python3 reorganize_models.py ./sd1.5 ./merge_rules.json")
-        print("  python3 reorganize_models.py ./sd1.5 ./merge_rules.json --mode copy")
+        print()
+        print("  # Dry run 模式")
         print("  python3 reorganize_models.py ./sd1.5 ./merge_rules.json --dry-run")
         sys.exit(1)
 
@@ -343,21 +354,21 @@ def main():
     rules_file = sys.argv[2]
 
     # 解析可选参数
-    operation_mode = 'move'  # 默认为移动模式
+    output_dir = None
     dry_run = False
 
-    for arg in sys.argv[3:]:
-        if arg == '--dry-run':
+    i = 3
+    while i < len(sys.argv):
+        if sys.argv[i] == '--output' and i + 1 < len(sys.argv):
+            output_dir = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == '--dry-run':
             dry_run = True
-        elif arg.startswith('--mode'):
-            if len(sys.argv) > sys.argv.index(arg) + 1:
-                idx = sys.argv.index(arg)
-                if idx + 1 < len(sys.argv):
-                    mode = sys.argv[idx + 1]
-                    if mode in ['copy', 'move']:
-                        operation_mode = mode
+            i += 1
+        else:
+            i += 1
 
-    reorganize_models(source_dir, rules_file, operation_mode, dry_run)
+    reorganize_models(source_dir, rules_file, output_dir, dry_run)
 
 
 if __name__ == '__main__':
