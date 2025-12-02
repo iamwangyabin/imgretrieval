@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-优化版本的图片组织脚本 - 使用多线程并行复制文件
+优化版本的图片组织脚本 - 使用多线程并行创建符号链接
 
 性能改进：
-1. 使用 ThreadPoolExecutor 进行并行文件复制（I/O 密集操作）
+1. 使用 ThreadPoolExecutor 进行并行符号链接创建（比文件复制快速）
 2. 预加载源文件映射，避免重复的 Path 操作和文件系统查询
 3. 批量构建目录，减少系统调用
 4. 优化路径操作，缓存中间结果
+5. 大幅节省磁盘空间 - 原始数据保留在源目录，新目录只创建符号链接
 
 图片文件采用三层级嵌套目录结构存储：
 
@@ -18,13 +19,16 @@
 3. 文件命名：数字ID + 扩展名
    例如：2452418.png, 5812418.json, 6182418.png
    扩展名通常为：.png, .jpg, .json
+
+注意：使用符号链接的好处：
+- 节省存储空间（符号链接只占几百字节）
+- 数据仍在原地方，避免数据冗余
+- 快速创建链接，性能更好
 """
 
 import csv
-import shutil
 import sys
 import re
-import subprocess
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -58,7 +62,7 @@ except ImportError:
 def build_source_file_index(source_dir):
     """
     预加载所有源文件到内存中，建立快速查找映射。
-    这避免了在复制过程中重复的文件系统查询。
+    这避免了在创建符号链接过程中重复的文件系统查询。
     
     Args:
         source_dir: 源目录根路径
@@ -144,65 +148,62 @@ def sanitize_path(path_str):
     return safe_str
 
 
-def copy_file_task(source_path, dest_path, file_index):
+def create_symlink_task(source_path, dest_path, file_index):
     """
-    单个文件复制任务（用于线程池）。
-    使用系统级 cp 指令进行高速文件复制。
+    单个符号链接创建任务（用于线程池）。
+    创建符号链接而不是复制文件，节省磁盘空间。
     
     Args:
         source_path: 源文件路径（字符串）
-        dest_path: 目标文件路径（Path 对象或字符串）
+        dest_path: 目标符号链接路径（Path 对象或字符串）
         file_index: 源文件索引（用于查找 JSON 文件）
     
     Returns:
         tuple: (success, filename)
     """
     try:
-        # 转换为字符串以便使用
-        source_str = str(source_path)
-        dest_str = str(dest_path)
+        # 转换为 Path 对象以便操作
+        source_path_obj = Path(source_path)
+        dest_path_obj = Path(dest_path) if not isinstance(dest_path, Path) else dest_path
         
         # 确保目标目录存在
-        dest_path_obj = Path(dest_path) if not isinstance(dest_path, Path) else dest_path
         dest_path_obj.parent.mkdir(parents=True, exist_ok=True)
         
-        # 使用系统级 cp 命令复制文件（更快）
-        # -p: 保留原文件的属性（权限、所有者、时间戳等）
-        # -f: 如果目标文件存在，先删除再复制
-        result = subprocess.run(
-            ['cp', '-p', '-f', source_str, dest_str],
-            capture_output=True,
-            timeout=30
-        )
+        # 如果目标符号链接已存在，先删除
+        if dest_path_obj.exists() or dest_path_obj.is_symlink():
+            dest_path_obj.unlink()
         
-        if result.returncode != 0:
-            return False, Path(dest_path).name
+        # 创建符号链接
+        # 使用绝对路径确保链接的有效性
+        source_abs = source_path_obj.resolve()
+        os.symlink(source_abs, dest_path_obj)
         
-        # 尝试复制对应的 JSON 文件
-        name_without_ext = Path(source_str).stem
+        # 尝试为对应的 JSON 文件创建符号链接
+        name_without_ext = source_path_obj.stem
         json_filename = f"{name_without_ext}.json"
         source_json_path = get_source_image_path_cached(json_filename, file_index)
         
         if source_json_path:
             try:
                 dest_json_path = dest_path_obj.parent / json_filename
-                dest_json_str = str(dest_json_path)
-                subprocess.run(
-                    ['cp', '-p', '-f', source_json_path, dest_json_str],
-                    capture_output=True,
-                    timeout=30
-                )
+                
+                # 如果目标 JSON 符号链接已存在，先删除
+                if dest_json_path.exists() or dest_json_path.is_symlink():
+                    dest_json_path.unlink()
+                
+                source_json_abs = Path(source_json_path).resolve()
+                os.symlink(source_json_abs, dest_json_path)
             except Exception:
-                pass  # JSON 复制失败不影响主流程
+                pass  # JSON 符号链接创建失败不影响主流程
         
-        return True, Path(dest_path).name
+        return True, dest_path_obj.name
     except Exception as e:
         return False, Path(dest_path).name
 
 
 def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_workers=8):
     """
-    优化版本：读取 CSV 文件，使用多线程并行复制图片。
+    优化版本：读取 CSV 文件，使用多线程并行创建符号链接。
     
     Args:
         csv_file: CSV 文件路径
@@ -263,9 +264,9 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
     file_index = build_source_file_index(image_source_dir)
     print(f"源文件索引完成：共 {len(file_index)} 个文件\n")
     
-    # 准备所有复制任务
+    # 准备所有符号链接任务
     total_files = len(image_records)
-    copy_tasks = []
+    symlink_tasks = []
     
     output_dir = Path(output_base_dir)
     
@@ -280,8 +281,8 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
             model_path = base_model_path / safe_model_name
             model_path.mkdir(parents=True, exist_ok=True)
     
-    # 构建复制任务列表
-    print("正在准备复制任务...")
+    # 构建符号链接任务列表
+    print("正在准备符号链接任务...")
     for base_model in hierarchy.keys():
         safe_base_model = sanitize_path(base_model)
         base_model_path = output_dir / safe_base_model
@@ -295,29 +296,29 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
                 
                 if source_file:
                     dest_file = model_path / filename
-                    copy_tasks.append((source_file, dest_file))
+                    symlink_tasks.append((source_file, dest_file))
     
-    print(f"准备了 {len(copy_tasks)} 个复制任务\n")
-    print(f"开始复制（使用 {num_workers} 个线程）...\n")
+    print(f"准备了 {len(symlink_tasks)} 个符号链接任务\n")
+    print(f"开始创建符号链接（使用 {num_workers} 个线程）...\n")
     
-    # 使用线程池并行复制
-    total_copied = 0
+    # 使用线程池并行创建符号链接
+    total_linked = 0
     total_failed = 0
     
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         # 提交所有任务
         futures = {
-            executor.submit(copy_file_task, source, dest, file_index): (source, dest)
-            for source, dest in copy_tasks
+            executor.submit(create_symlink_task, source, dest, file_index): (source, dest)
+            for source, dest in symlink_tasks
         }
         
         # 使用进度条处理完成的任务
-        with tqdm(total=len(copy_tasks), desc="复制进度", unit="张") as pbar:
+        with tqdm(total=len(symlink_tasks), desc="符号链接创建进度", unit="个") as pbar:
             for future in as_completed(futures):
                 try:
                     success, filename = future.result()
                     if success:
-                        total_copied += 1
+                        total_linked += 1
                     else:
                         total_failed += 1
                 except Exception:
@@ -330,8 +331,8 @@ def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_w
     print(f"图片组织完成！")
     print(f"{'='*60}")
     print(f"输出目录: {output_dir}")
-    print(f"成功复制: {total_copied} 张图片")
-    print(f"复制失败: {total_failed} 张图片")
+    print(f"成功创建符号链接: {total_linked} 个")
+    print(f"创建失败: {total_failed} 个")
     print(f"{'='*60}\n")
 
 
