@@ -24,6 +24,7 @@ import csv
 import shutil
 import sys
 import re
+import subprocess
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -146,37 +147,57 @@ def sanitize_path(path_str):
 def copy_file_task(source_path, dest_path, file_index):
     """
     单个文件复制任务（用于线程池）。
+    使用系统级 cp 指令进行高速文件复制。
     
     Args:
-        source_path: 源文件路径
-        dest_path: 目标文件路径
+        source_path: 源文件路径（字符串）
+        dest_path: 目标文件路径（Path 对象或字符串）
         file_index: 源文件索引（用于查找 JSON 文件）
     
     Returns:
         tuple: (success, filename)
     """
     try:
-        # 确保目标目录存在
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # 转换为字符串以便使用
+        source_str = str(source_path)
+        dest_str = str(dest_path)
         
-        # 复制文件
-        shutil.copy2(source_path, dest_path)
+        # 确保目标目录存在
+        dest_path_obj = Path(dest_path) if not isinstance(dest_path, Path) else dest_path
+        dest_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 使用系统级 cp 命令复制文件（更快）
+        # -p: 保留原文件的属性（权限、所有者、时间戳等）
+        # -f: 如果目标文件存在，先删除再复制
+        result = subprocess.run(
+            ['cp', '-p', '-f', source_str, dest_str],
+            capture_output=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            return False, Path(dest_path).name
         
         # 尝试复制对应的 JSON 文件
-        name_without_ext = Path(source_path).stem
+        name_without_ext = Path(source_str).stem
         json_filename = f"{name_without_ext}.json"
         source_json_path = get_source_image_path_cached(json_filename, file_index)
         
         if source_json_path:
             try:
-                dest_json_path = dest_path.parent / json_filename
-                shutil.copy2(source_json_path, dest_json_path)
+                dest_json_path = dest_path_obj.parent / json_filename
+                dest_json_str = str(dest_json_path)
+                subprocess.run(
+                    ['cp', '-p', '-f', source_json_path, dest_json_str],
+                    capture_output=True,
+                    timeout=30
+                )
             except Exception:
                 pass  # JSON 复制失败不影响主流程
         
-        return True, dest_path.name
+        return True, Path(dest_path).name
     except Exception as e:
-        return False, dest_path.name
+        return False, Path(dest_path).name
 
 
 def organize_images_optimized(csv_file, image_source_dir, output_base_dir, num_workers=8):
