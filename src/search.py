@@ -2,7 +2,8 @@ import os
 import pickle
 import numpy as np
 import faiss
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.config import INDEX_PATH, DATA_DIR, FEATURE_DIM
 from src.database import get_all_features
 from src.model import FeatureExtractor
@@ -107,7 +108,6 @@ class SearchEngine:
             List of (image_path, similarity_score) tuples, sorted by similarity (highest first)
         """
         if self.index is None:
-            print("Index not loaded. Please build or load index first.")
             return []
         
         # Ensure query vector is 2D array with shape (1, feature_dim)
@@ -141,23 +141,86 @@ class SearchEngine:
             List of (image_path, similarity_score) tuples, sorted by similarity (highest first)
         """
         if self.index is None:
-            print("Index not loaded. Please build or load index first.")
             return []
         
         # Initialize feature extractor if needed
         if self.feature_extractor is None:
-            print("Initializing feature extractor...")
             self.feature_extractor = FeatureExtractor()
         
         # Extract feature for query image
-        print(f"Extracting features for query image: {query_image_path}")
         features, valid_indices = self.feature_extractor.extract([query_image_path])
         
         if features is None or len(valid_indices) == 0:
-            print(f"Failed to extract features from {query_image_path}")
             return []
         
         query_vector = features[0]
         
         # Search using the vector
         return self.search_by_vector(query_vector, k)
+    
+    def _search_single(self, query_vector: np.ndarray, k: int) -> List[Tuple[str, float]]:
+        """Helper method for single search (used by search_batch with threading)."""
+        return self.search_by_vector(query_vector, k)
+    
+    def search_batch(self, image_paths: List[str], k: int = 10, batch_size: int = 128, 
+                     num_threads: int = 8) -> Dict[str, List[Tuple[str, float]]]:
+        """
+        Search for similar images using a batch of query images.
+        Uses DataLoader for efficient feature extraction and multi-threading for FAISS search.
+        
+        Args:
+            image_paths: List of image paths to search
+            k: Number of results to return per image
+            batch_size: Batch size for feature extraction
+            num_threads: Number of threads for parallel FAISS search
+            
+        Returns:
+            Dict mapping image_path -> list of (matched_image_path, similarity_score) tuples
+        """
+        if self.index is None:
+            return {}
+        
+        # Initialize feature extractor if needed
+        if self.feature_extractor is None:
+            self.feature_extractor = FeatureExtractor()
+        
+        # Extract features in batches using DataLoader
+        print(f"Extracting features for {len(image_paths)} images...")
+        extracted_results = self.feature_extractor.extract_batch(image_paths, batch_size=batch_size)
+        
+        if not extracted_results:
+            print("Failed to extract features from any images")
+            return {}
+        
+        print(f"Successfully extracted {len(extracted_results)} features")
+        
+        # Prepare search tasks
+        search_tasks = [(path, feature) for path, feature in extracted_results]
+        
+        # Use thread pool for parallel FAISS search
+        results = {}
+        print(f"Searching with {num_threads} threads...")
+        
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            # Submit all search tasks
+            future_to_path = {
+                executor.submit(self._search_single, feature, k): path 
+                for path, feature in search_tasks
+            }
+            
+            # Process completed tasks
+            completed = 0
+            for future in as_completed(future_to_path):
+                path = future_to_path[future]
+                try:
+                    search_results = future.result()
+                    results[path] = search_results
+                    completed += 1
+                    if completed % 50 == 0:
+                        print(f"  Completed {completed}/{len(search_tasks)} searches")
+                except Exception as e:
+                    print(f"Error searching for {path}: {e}")
+                    results[path] = []
+        
+        print(f"✓ Search complete: {len(results)} results")
+        return results
