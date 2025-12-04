@@ -140,14 +140,12 @@ def process_model_folders(root_dir, max_images=3000, dry_run=False):
                         if not dry_run:
                             file_to_delete.unlink()
                         delete_count += 1
-                        print(f"    删除: {file_to_delete.name}")
                     except Exception as e:
                         stats['errors'].append(f"删除失败: {file_to_delete} - {e}")
-                        print(f"    错误: 无法删除 {file_to_delete.name}")
                 
                 stats['images_deleted'] += delete_count
                 stats['total_images_after'] += (num_images - delete_count)
-                print(f"  实际删除: {delete_count} 张\n")
+                print(f"  删除: {num_images} → {max_images} 张\n")
             else:
                 stats['total_images_after'] += num_images
     
