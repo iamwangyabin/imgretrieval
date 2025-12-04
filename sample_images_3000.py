@@ -13,6 +13,7 @@
 import os
 import sys
 import random
+import argparse
 from pathlib import Path
 from datetime import datetime
 
@@ -183,38 +184,44 @@ def print_summary(stats, dry_run=False):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("使用方法: python3 sample_images_3000.py <根目录> [--max-images N] [--dry-run]")
-        print()
-        print("参数说明:")
-        print("  <根目录>: 图片文件夹的根目录路径")
-        print("  --max-images N: 可选参数，指定每个文件夹的最大图片数（默认: 3000）")
-        print("  --dry-run: 可选参数，仅显示将要删除的文件，不实际删除")
-        print()
-        print("示例:")
-        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake")
-        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 5000")
-        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 2000 --dry-run")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description='采样脚本：确保每个模型文件夹下最多只有指定数量的图片',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+示例:
+  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake
+  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 5000
+  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 2000 --dry-run
+  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake -m 1000
+        '''
+    )
     
-    root_dir = sys.argv[1]
-    dry_run = '--dry-run' in sys.argv
-    max_images = 3000  # 默认值
+    parser.add_argument(
+        'root_dir',
+        help='图片文件夹的根目录路径'
+    )
     
-    # 解析 --max-images 参数
-    for i, arg in enumerate(sys.argv[2:], start=2):
-        if arg == '--max-images' and i + 1 < len(sys.argv):
-            try:
-                max_images = int(sys.argv[i + 1])
-                if max_images <= 0:
-                    print("错误：--max-images 必须是正整数")
-                    sys.exit(1)
-            except ValueError:
-                print(f"错误：--max-images 的值必须是整数，获得：{sys.argv[i + 1]}")
-                sys.exit(1)
+    parser.add_argument(
+        '--max-images', '-m',
+        type=int,
+        default=3000,
+        help='每个文件夹的最大图片数（默认: 3000）'
+    )
     
-    stats = process_model_folders(root_dir, max_images=max_images, dry_run=dry_run)
-    print_summary(stats, dry_run=dry_run)
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='仅显示将要删除的文件，不实际删除'
+    )
+    
+    args = parser.parse_args()
+    
+    # 验证 max_images 参数
+    if args.max_images <= 0:
+        parser.error("错误：--max-images 必须是正整数")
+    
+    stats = process_model_folders(args.root_dir, max_images=args.max_images, dry_run=args.dry_run)
+    print_summary(stats, dry_run=args.dry_run)
 
 
 if __name__ == '__main__':
