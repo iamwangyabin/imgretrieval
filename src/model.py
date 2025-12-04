@@ -125,14 +125,10 @@ class FeatureExtractor:
             for batch_tensors, indices, paths in dataloader:
                 # Filter out None values
                 valid_mask = [t is not None for t in batch_tensors]
-                valid_tensors = [t for t in batch_tensors if t is not None]
                 valid_indices = [i for i, valid in enumerate(valid_mask) if valid]
                 valid_paths = [p for p, valid in zip(paths, valid_mask) if valid]
-                
-                if not valid_tensors:
-                    continue
-                
-                batch = torch.stack(valid_tensors).to(self.device)
+
+                batch = batch_tensors.to(self.device)
                 features = self.model(batch)
                 features = torch.nn.functional.normalize(features, p=2, dim=1)
                 features_np = features.cpu().numpy()
