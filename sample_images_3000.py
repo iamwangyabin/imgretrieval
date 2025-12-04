@@ -184,21 +184,36 @@ def print_summary(stats, dry_run=False):
 
 def main():
     if len(sys.argv) < 2:
-        print("使用方法: python3 sample_images_3000.py <根目录> [--dry-run]")
+        print("使用方法: python3 sample_images_3000.py <根目录> [--max-images N] [--dry-run]")
         print()
         print("参数说明:")
         print("  <根目录>: 图片文件夹的根目录路径")
+        print("  --max-images N: 可选参数，指定每个文件夹的最大图片数（默认: 3000）")
         print("  --dry-run: 可选参数，仅显示将要删除的文件，不实际删除")
         print()
         print("示例:")
         print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake")
-        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --dry-run")
+        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 5000")
+        print("  python3 sample_images_3000.py /home/data/yabin/DFLIP3K/fake --max-images 2000 --dry-run")
         sys.exit(1)
     
     root_dir = sys.argv[1]
     dry_run = '--dry-run' in sys.argv
+    max_images = 3000  # 默认值
     
-    stats = process_model_folders(root_dir, max_images=3000, dry_run=dry_run)
+    # 解析 --max-images 参数
+    for i, arg in enumerate(sys.argv[2:], start=2):
+        if arg == '--max-images' and i + 1 < len(sys.argv):
+            try:
+                max_images = int(sys.argv[i + 1])
+                if max_images <= 0:
+                    print("错误：--max-images 必须是正整数")
+                    sys.exit(1)
+            except ValueError:
+                print(f"错误：--max-images 的值必须是整数，获得：{sys.argv[i + 1]}")
+                sys.exit(1)
+    
+    stats = process_model_folders(root_dir, max_images=max_images, dry_run=dry_run)
     print_summary(stats, dry_run=dry_run)
 
 
