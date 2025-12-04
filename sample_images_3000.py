@@ -109,6 +109,10 @@ def process_model_folders(root_dir, max_images=3000, dry_run=False):
             stats['errors'].append(f"无权限访问: {base_model_dir}")
             continue
         
+        # 如果该 base_model 下只有一个文件夹，则跳过
+        if len(specific_models) <= 1:
+            continue
+        
         for specific_model_dir in specific_models:
             specific_model_name = specific_model_dir.name
             folder_path = specific_model_dir
