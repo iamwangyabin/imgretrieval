@@ -13,9 +13,80 @@ import os
 import json
 import argparse
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 from src.search import SearchEngine
 from PIL import Image
+import time
+
+
+class CheckpointManager:
+    """Manages progress checkpoints for resumable processing."""
+    
+    def __init__(self, output_root: str):
+        """Initialize checkpoint manager."""
+        self.output_root = output_root
+        self.checkpoint_path = os.path.join(output_root, ".checkpoint.json")
+        self.checkpoint_data = self._load_checkpoint()
+    
+    def _load_checkpoint(self) -> Dict:
+        """Load checkpoint from file if it exists."""
+        if os.path.exists(self.checkpoint_path):
+            try:
+                with open(self.checkpoint_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load checkpoint: {e}")
+                return self._create_empty_checkpoint()
+        return self._create_empty_checkpoint()
+    
+    def _create_empty_checkpoint(self) -> Dict:
+        """Create an empty checkpoint structure."""
+        return {
+            "processed_images": [],
+            "failed_images": [],
+            "pairs_count": 0,
+            "start_time": None,
+            "last_update_time": None
+        }
+    
+    def save(self):
+        """Save checkpoint to file."""
+        self.checkpoint_data["last_update_time"] = time.time()
+        try:
+            with open(self.checkpoint_path, 'w') as f:
+                json.dump(self.checkpoint_data, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Could not save checkpoint: {e}")
+    
+    def is_processed(self, image_path: str) -> bool:
+        """Check if image has been processed."""
+        return image_path in self.checkpoint_data["processed_images"]
+    
+    def mark_processed(self, image_path: str, pair_data: Dict = None):
+        """Mark image as successfully processed."""
+        if image_path not in self.checkpoint_data["processed_images"]:
+            self.checkpoint_data["processed_images"].append(image_path)
+            if pair_data:
+                self.checkpoint_data["pairs_count"] += 1
+    
+    def mark_failed(self, image_path: str):
+        """Mark image as failed."""
+        if image_path not in self.checkpoint_data["failed_images"]:
+            self.checkpoint_data["failed_images"].append(image_path)
+    
+    def get_processed_count(self) -> int:
+        """Get count of processed images."""
+        return len(self.checkpoint_data["processed_images"])
+    
+    def get_failed_count(self) -> int:
+        """Get count of failed images."""
+        return len(self.checkpoint_data["failed_images"])
+    
+    def clear(self):
+        """Clear checkpoint data."""
+        self.checkpoint_data = self._create_empty_checkpoint()
+        self.checkpoint_data["start_time"] = time.time()
+        self.save()
 
 
 def is_valid_image(path: str) -> bool:
@@ -79,15 +150,17 @@ def create_mirror_directory(fake_root: str, output_root: str, model_name: str, f
     fake_path_obj = Path(fake_path)
     fake_root_obj = Path(fake_root)
     
-    # Get relative path from fake_root
+    # Get relative path from the model directory
     if model_name == 'root':
         relative_path = fake_path_obj.parent.relative_to(fake_root_obj)
     else:
-        # For model subdirectories, preserve the structure
+        # For model subdirectories, get relative path from model directory
+        model_root = fake_root_obj / model_name
         try:
-            relative_path = fake_path_obj.parent.relative_to(fake_root_obj)
+            relative_path = fake_path_obj.parent.relative_to(model_root)
         except ValueError:
-            relative_path = fake_path_obj.parent.name
+            # Fallback if path structure is unexpected
+            relative_path = Path('.')
     
     output_dir = Path(output_root) / model_name / relative_path
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +172,9 @@ def build_fake_real_pairs(
     fake_root: str,
     output_root: str = None,
     top_k: int = 10,
-    verbose: bool = True
+    verbose: bool = True,
+    resume: bool = False,
+    clean: bool = False
 ):
     """
     Main function to build fake-real image pairs.
@@ -109,6 +184,8 @@ def build_fake_real_pairs(
         output_root: Output directory for paired real images (default: fake_root_parent/real_paired)
         top_k: Number of top candidates to consider for matching
         verbose: Print progress information
+        resume: Resume from previous checkpoint
+        clean: Clear previous checkpoint and start fresh
     """
     
     print("="*70)
@@ -131,6 +208,30 @@ def build_fake_real_pairs(
     
     # Create output directory
     os.makedirs(output_root, exist_ok=True)
+    
+    # Initialize checkpoint manager
+    checkpoint_mgr = CheckpointManager(output_root)
+    
+    # Handle clean flag
+    if clean:
+        print("\n[Checkpoint] Clearing previous progress...")
+        checkpoint_mgr.clear()
+        print("✓ Checkpoint cleared, starting fresh")
+    elif resume:
+        processed = checkpoint_mgr.get_processed_count()
+        failed = checkpoint_mgr.get_failed_count()
+        if processed > 0 or failed > 0:
+            print(f"\n[Checkpoint] Resuming from previous run:")
+            print(f"  Previously processed: {processed}")
+            print(f"  Previously failed:    {failed}")
+        else:
+            print("\n[Checkpoint] No previous checkpoint found, starting fresh")
+    else:
+        # If not resuming and checkpoint exists, warn user
+        if checkpoint_mgr.get_processed_count() > 0:
+            print("\n[Checkpoint] Previous progress detected!")
+            print(f"  Processed: {checkpoint_mgr.get_processed_count()}")
+            print(f"  Run with --resume to continue, or --clean to restart")
     
     # Step 1: Scan fake directory
     print("\n[Step 1] Scanning fake image directory...")
@@ -163,9 +264,22 @@ def build_fake_real_pairs(
         "pairs": []
     }
     
-    processed_count = 0
-    failed_count = 0
-    symlink_count = 0
+    # Load existing pairs if resuming
+    metadata_path = os.path.join(output_root, "pairing_metadata.json")
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, 'r') as f:
+                existing_data = json.load(f)
+                pairing_data["pairs"] = existing_data.get("pairs", [])
+        except:
+            pass
+    
+    processed_count = checkpoint_mgr.get_processed_count()
+    failed_count = checkpoint_mgr.get_failed_count()
+    symlink_count = len(pairing_data["pairs"])
+    
+    total_to_process = total_fake_images - processed_count - failed_count
+    start_time = time.time()
     
     for model_name in sorted(model_images.keys()):
         images = model_images[model_name]
@@ -173,6 +287,14 @@ def build_fake_real_pairs(
         print(f"\n  Processing model '{model_name}' ({len(images)} images)...")
         
         for idx, fake_image_path in enumerate(images, 1):
+            # Skip if already processed
+            if checkpoint_mgr.is_processed(fake_image_path):
+                if verbose and idx % 50 == 0:
+                    progress = processed_count + failed_count
+                    pct = (progress / total_fake_images) * 100
+                    print(f"    ⊘ Skipped {idx}/{len(images)} images (already processed, {pct:.1f}% done)")
+                continue
+            
             try:
                 # Create output directory for this image
                 output_dir = create_mirror_directory(fake_root, output_root, model_name, fake_image_path)
@@ -185,6 +307,8 @@ def build_fake_real_pairs(
                     if verbose:
                         print(f"    ✗ {fake_filename}: No matching real image found")
                     failed_count += 1
+                    checkpoint_mgr.mark_failed(fake_image_path)
+                    checkpoint_mgr.save()
                     continue
                 
                 # Get the best match (first result)
@@ -204,7 +328,7 @@ def build_fake_real_pairs(
                 symlink_count += 1
                 
                 # Record pairing information
-                pairing_data["pairs"].append({
+                pair_info = {
                     "fake_image": fake_image_path,
                     "fake_filename": fake_filename,
                     "fake_directory": output_dir,
@@ -214,16 +338,33 @@ def build_fake_real_pairs(
                     "similarity_score": float(similarity_score),
                     "model": model_name,
                     "rank": 1  # Position in search results
-                })
-                
-                if verbose and idx % 10 == 0:
-                    print(f"    ✓ Processed {idx}/{len(images)} images")
+                }
+                pairing_data["pairs"].append(pair_info)
                 
                 processed_count += 1
+                checkpoint_mgr.mark_processed(fake_image_path, pair_info)
+                
+                # Save checkpoint every 10 processed images
+                if processed_count % 10 == 0:
+                    checkpoint_mgr.save()
+                    if verbose:
+                        elapsed = time.time() - start_time
+                        progress = processed_count + failed_count
+                        pct = (progress / total_fake_images) * 100
+                        rate = (processed_count + failed_count) / elapsed if elapsed > 0 else 0
+                        remaining = (total_fake_images - progress) / rate if rate > 0 else 0
+                        print(f"    ✓ Processed {idx}/{len(images)} images ({pct:.1f}%, ~{remaining/60:.0f}min remaining)")
                 
             except Exception as e:
-                print(f"    ✗ {fake_filename}: {str(e)}")
+                fake_filename = os.path.basename(fake_image_path)
+                if verbose:
+                    print(f"    ✗ {fake_filename}: {str(e)}")
                 failed_count += 1
+                checkpoint_mgr.mark_failed(fake_image_path)
+                checkpoint_mgr.save()
+    
+    # Final checkpoint save
+    checkpoint_mgr.save()
     
     # Step 4: Summary and save metadata
     print("\n[Step 4] Saving pairing metadata...")
@@ -292,6 +433,18 @@ Examples:
         help="Suppress detailed progress output"
     )
     
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from previous checkpoint (skip already processed images)"
+    )
+    
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clear previous checkpoint and start fresh"
+    )
+    
     args = parser.parse_args()
     
     try:
@@ -299,7 +452,9 @@ Examples:
             fake_root=args.fake_root,
             output_root=args.output,
             top_k=args.top_k,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            resume=args.resume,
+            clean=args.clean
         )
     except Exception as e:
         print(f"\n❌ Error: {e}")
