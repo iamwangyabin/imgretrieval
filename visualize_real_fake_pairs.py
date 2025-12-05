@@ -2,13 +2,13 @@
 Visualize Random Fake-Real Image Pairs
 
 This script:
-1. Reads pairing metadata from build_fake_real_pairs.py output
-2. Randomly selects 10 pairs of fake-real images
-3. Creates a visualization showing them side-by-side
+1. Scans the real directory (containing symlinks)
+2. Pairs each symlink with its corresponding fake image from fake_root
+3. Randomly selects 10 pairs of fake-real images
+4. Creates a visualization showing them side-by-side
 """
 
 import os
-import json
 import argparse
 import random
 from pathlib import Path
@@ -18,35 +18,80 @@ from PIL import Image
 import numpy as np
 
 
-def load_pairing_metadata(output_dir: str) -> Dict:
-    """Load pairing metadata from output directory."""
-    metadata_path = os.path.join(output_dir, "pairing_metadata.json")
+def scan_real_directory(real_dir: str, fake_root: str) -> List[Dict]:
+    """
+    Scan real directory (containing symlinks) and build pairing list.
     
-    if not os.path.exists(metadata_path):
-        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
+    Args:
+        real_dir: Directory containing symlinks (output from build_fake_real_pairs.py)
+        fake_root: Original fake images directory
+        
+    Returns:
+        List of pairing dictionaries with fake_image and real_image paths
+    """
+    pairs = []
+    real_path = Path(real_dir)
+    fake_root_path = Path(fake_root)
     
-    with open(metadata_path, 'r') as f:
-        metadata = json.load(f)
+    if not real_path.exists():
+        raise ValueError(f"Real directory not found: {real_dir}")
+    if not fake_root_path.exists():
+        raise ValueError(f"Fake root directory not found: {fake_root}")
     
-    return metadata
+    # Recursively find all symlinks in real_dir
+    for symlink in real_path.rglob('*'):
+        # Check if it's a symlink
+        if not os.path.islink(str(symlink)):
+            continue
+        
+        # Get the real image path that the symlink points to
+        real_image_path = os.path.realpath(str(symlink))
+        
+        # Verify the target exists
+        if not os.path.exists(real_image_path):
+            continue
+        
+        # Get the relative path of the symlink within real_dir
+        # This will be: model_name/relative_path/fake_filename
+        try:
+            relative_symlink = symlink.relative_to(real_path)
+        except ValueError:
+            continue
+        
+        # Construct the corresponding fake image path
+        # The relative path structure should match between real_dir and fake_root
+        fake_image_path = fake_root_path / relative_symlink
+        
+        # Verify the fake image exists
+        if not os.path.exists(str(fake_image_path)):
+            continue
+        
+        # Create pair entry
+        pair = {
+            "fake_image": str(fake_image_path),
+            "fake_filename": os.path.basename(str(fake_image_path)),
+            "real_image": real_image_path,
+            "real_filename": os.path.basename(real_image_path),
+            "model": relative_symlink.parts[0] if len(relative_symlink.parts) > 1 else "unknown"
+        }
+        
+        pairs.append(pair)
+    
+    if not pairs:
+        raise ValueError(f"No valid image pairs found. Check that real_dir contains symlinks "
+                        f"and fake_root contains corresponding fake images.")
+    
+    return pairs
 
 
 def validate_image_path(path: str) -> bool:
     """Check if image path exists and is readable."""
-    if os.path.islink(path):
-        # For symlinks, follow the link
-        real_path = os.path.realpath(path)
-        return os.path.exists(real_path) and os.path.isfile(real_path)
     return os.path.exists(path) and os.path.isfile(path)
 
 
 def load_image(image_path: str, max_size: Tuple[int, int] = (300, 300)) -> Image.Image:
     """Load and resize image."""
     try:
-        # Handle symlinks
-        if os.path.islink(image_path):
-            image_path = os.path.realpath(image_path)
-        
         img = Image.open(image_path)
         
         # Convert RGBA to RGB if necessary
@@ -64,20 +109,18 @@ def load_image(image_path: str, max_size: Tuple[int, int] = (300, 300)) -> Image
         return None
 
 
-def select_valid_pairs(metadata: Dict, num_pairs: int = 10) -> List[Dict]:
+def select_valid_pairs(pairs: List[Dict], num_pairs: int = 10) -> List[Dict]:
     """Select pairs where both fake and real images exist."""
-    pairs = metadata.get("pairs", [])
-    
     valid_pairs = []
     for pair in pairs:
         fake_path = pair.get("fake_image")
-        real_path = pair.get("matched_real_image")
+        real_path = pair.get("real_image")
         
         if fake_path and real_path and validate_image_path(fake_path) and validate_image_path(real_path):
             valid_pairs.append(pair)
     
     if len(valid_pairs) == 0:
-        raise ValueError("No valid image pairs found in metadata")
+        raise ValueError("No valid image pairs found")
     
     # Randomly select pairs
     selected_pairs = random.sample(valid_pairs, min(num_pairs, len(valid_pairs)))
@@ -101,8 +144,7 @@ def create_visualization(pairs: List[Dict], output_path: str = "fake_real_pairs_
     
     for idx, pair in enumerate(pairs):
         fake_path = pair.get("fake_image")
-        real_path = pair.get("matched_real_image")
-        similarity = pair.get("similarity_score", 0)
+        real_path = pair.get("real_image")
         
         # Load fake image
         fake_img = load_image(fake_path)
@@ -126,8 +168,7 @@ def create_visualization(pairs: List[Dict], output_path: str = "fake_real_pairs_
         ax_real = axes[idx, 1]
         ax_real.imshow(real_img)
         real_filename = os.path.basename(real_path)
-        score_text = f"Similarity: {similarity:.4f}" if similarity else "Similarity: N/A"
-        ax_real.set_title(f"Real Match\n{real_filename[:30]}... ({score_text})", fontsize=10)
+        ax_real.set_title(f"Real Match\n{real_filename[:30]}...", fontsize=10)
         ax_real.axis('off')
     
     plt.tight_layout()
@@ -143,19 +184,24 @@ def create_visualization(pairs: List[Dict], output_path: str = "fake_real_pairs_
 def main():
     """Command-line interface for visualizing fake-real pairs."""
     parser = argparse.ArgumentParser(
-        description="Visualize random fake-real image pairs from build_fake_real_pairs.py output",
+        description="Visualize random fake-real image pairs from real directory and fake root",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python visualize_real_fake_pairs.py /path/to/output_dir
-  python visualize_real_fake_pairs.py /path/to/output_dir --num-pairs 5 --output viz.jpg
-  python visualize_real_fake_pairs.py /path/to/output_dir --seed 42
+  python visualize_real_fake_pairs.py /path/to/real_dir /path/to/fake_root
+  python visualize_real_fake_pairs.py /path/to/real_dir /path/to/fake_root --num-pairs 5 --output viz.jpg
+  python visualize_real_fake_pairs.py /path/to/real_dir /path/to/fake_root --seed 42
         """
     )
     
     parser.add_argument(
-        "output_dir",
-        help="Output directory from build_fake_real_pairs.py (contains pairing_metadata.json)"
+        "real_dir",
+        help="Real directory containing symlinks (output from build_fake_real_pairs.py)"
+    )
+    
+    parser.add_argument(
+        "fake_root",
+        help="Original fake images directory"
     )
     
     parser.add_argument(
@@ -195,24 +241,24 @@ Examples:
         print("="*70)
         print("Visualizing Fake-Real Image Pairs")
         print("="*70)
-        print(f"\nLoading metadata from: {args.output_dir}")
+        print(f"\nScanning real directory: {args.real_dir}")
+        print(f"Fake root directory:    {args.fake_root}")
         
-        # Load metadata
-        metadata = load_pairing_metadata(args.output_dir)
-        total_pairs = len(metadata.get("pairs", []))
-        print(f"Total pairs in metadata: {total_pairs}")
+        # Scan real directory and build pairs
+        all_pairs = scan_real_directory(args.real_dir, args.fake_root)
+        total_pairs = len(all_pairs)
+        print(f"Total pairs found: {total_pairs}")
         
         # Select valid pairs
         print(f"\nSelecting {args.num_pairs} random valid pairs...")
-        selected_pairs = select_valid_pairs(metadata, args.num_pairs)
+        selected_pairs = select_valid_pairs(all_pairs, args.num_pairs)
         print(f"✓ Selected {len(selected_pairs)} valid pairs")
         
         if args.verbose:
             for i, pair in enumerate(selected_pairs, 1):
                 print(f"\n  Pair {i}:")
                 print(f"    Fake:  {pair.get('fake_filename')}")
-                print(f"    Real:  {pair.get('matched_real_filename')}")
-                print(f"    Similarity: {pair.get('similarity_score', 'N/A')}")
+                print(f"    Real:  {pair.get('real_filename')}")
         
         # Create visualization
         print(f"\nCreating visualization...")
