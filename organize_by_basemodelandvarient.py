@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-根据单个CSV文件整理图片，创建符号链接。
+根据两个CSV文件整理图片，创建符号链接。
 
-此脚本读取一个CSV文件，根据baseModel创建单层目录结构。
+此脚本读取两个CSV文件，根据图片ID合并数据，并创建两层目录结构。
 
 输入文件：
-1. csv_file：包含 id 和 baseModel 列
+1. base_model_csv：包含 id 和 baseModel 列（基础模型）
+2. model_name_csv：包含 id 和 baseModel 列（具体模型名称）
 
 功能：
-1. 读取CSV文件
+1. 读取两个CSV文件并根据id合并数据
 2. 预加载源目录中的所有文件，建立快速查找映射
-3. 创建单层目录结构: <output_dir>/<base_model>/
+3. 创建两层目录结构: <output_dir>/<base_model>/<model_name>/
 4. 为每个图片创建符号链接到对应的目录
 5. 同时为对应的.json文件创建符号链接
 6. 使用进度条显示处理进度
@@ -177,21 +178,22 @@ def create_symlink_task(source_path, dest_path, file_index):
         return False, Path(dest_path).name
 
 
-def organize_images_by_basemodel(csv_file, image_source_dir, output_base_dir):
+def organize_images_by_two_csvs(base_model_csv, model_name_csv, image_source_dir, output_base_dir):
     """
-    根据单个CSV文件组织图片，创建单层目录结构。
+    根据两个CSV文件组织图片，创建两层目录结构。
     
     Args:
-        csv_file: CSV文件路径，包含 id 和 baseModel 列
+        base_model_csv: CSV文件路径，包含 id 和 baseModel（基础模型）列
+        model_name_csv: CSV文件路径，包含 id 和 baseModel（具体模型名称）列
         image_source_dir: 源图片存储目录（三层级结构的根目录）
         output_base_dir: 输出目录的根路径
     """
     
-    # 读取CSV：id -> baseModel
-    print(f"正在读取 CSV 文件: {csv_file}")
+    # 读取第一个CSV：id -> baseModel（基础模型）
+    print(f"正在读取基础模型 CSV 文件: {base_model_csv}")
     base_model_map = {}
     try:
-        with open(csv_file, 'r', encoding='utf-8') as f:
+        with open(base_model_csv, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 image_id = row.get('id', '').strip()
@@ -206,25 +208,56 @@ def organize_images_by_basemodel(csv_file, image_source_dir, output_base_dir):
                 base_model_map[image_id] = base_model
     
     except FileNotFoundError:
-        print(f"错误: CSV 文件 '{csv_file}' 不存在")
+        print(f"错误: CSV 文件 '{base_model_csv}' 不存在")
         sys.exit(1)
     except Exception as e:
-        print(f"错误读取 CSV '{csv_file}': {e}")
+        print(f"错误读取 CSV '{base_model_csv}': {e}")
         sys.exit(1)
     
     print(f"  读取完成，共 {len(base_model_map)} 条记录\n")
     
-    # 构建目录结构：{base_model: [id1, id2, ...]}
-    hierarchy = defaultdict(list)
+    # 读取第二个CSV：id -> baseModel（具体模型名称）
+    print(f"正在读取模型名称 CSV 文件: {model_name_csv}")
+    model_name_map = {}
+    try:
+        with open(model_name_csv, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                image_id = row.get('id', '').strip()
+                model_name = row.get('baseModel', 'Unknown').strip()
+                
+                if not image_id:
+                    continue
+                
+                if not model_name or model_name.lower() == 'nan':
+                    model_name = 'Unknown'
+                
+                model_name_map[image_id] = model_name
+    
+    except FileNotFoundError:
+        print(f"错误: CSV 文件 '{model_name_csv}' 不存在")
+        sys.exit(1)
+    except Exception as e:
+        print(f"错误读取 CSV '{model_name_csv}': {e}")
+        sys.exit(1)
+    
+    print(f"  读取完成，共 {len(model_name_map)} 条记录\n")
+    
+    # 合并两个映射：建立两层目录结构
+    # 结构：{base_model: {model_name: [id1, id2, ...]}}
+    hierarchy = defaultdict(lambda: defaultdict(list))
     total_images = 0
     
-    print("正在组织数据...")
-    for image_id, base_model in base_model_map.items():
-        hierarchy[base_model].append(image_id)
+    print("正在合并数据...")
+    # 使用第二个CSV（model_name_csv）作为主要来源
+    for image_id in model_name_map.keys():
+        base_model = base_model_map.get(image_id, 'Unknown')
+        model_name = model_name_map[image_id]
+        
+        hierarchy[base_model][model_name].append(image_id)
         total_images += 1
     
-    print(f"  组织完成，共 {total_images} 条图片记录")
-    print(f"  共 {len(hierarchy)} 个baseModel类别\n")
+    print(f"  合并完成，共 {total_images} 条图片记录\n")
     
     # 预加载源文件索引
     print("正在构建源文件索引...")
@@ -239,26 +272,30 @@ def organize_images_by_basemodel(csv_file, image_source_dir, output_base_dir):
     print("正在创建目录结构...")
     for base_model in hierarchy.keys():
         safe_base_model = sanitize_path(base_model)
-        model_path = output_dir / safe_base_model
-        model_path.mkdir(parents=True, exist_ok=True)
+        for model_name in hierarchy[base_model].keys():
+            safe_model_name = sanitize_path(model_name)
+            model_path = output_dir / safe_base_model / safe_model_name
+            model_path.mkdir(parents=True, exist_ok=True)
     
     # 构建符号链接任务列表
     print("正在准备符号链接任务...\n")
-    for base_model, image_ids in hierarchy.items():
+    for base_model in hierarchy.keys():
         safe_base_model = sanitize_path(base_model)
-        model_path = output_dir / safe_base_model
-        
-        for image_id in image_ids:
-            # 尝试找到对应的图片文件
-            # 支持多种扩展名
-            for ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff']:
-                filename = f"{image_id}{ext}"
-                source_file = get_source_image_path_cached(filename, file_index)
-                
-                if source_file:
-                    dest_file = model_path / filename
-                    symlink_tasks.append((source_file, dest_file))
-                    break
+        for model_name in hierarchy[base_model].keys():
+            safe_model_name = sanitize_path(model_name)
+            model_path = output_dir / safe_base_model / safe_model_name
+            
+            for image_id in hierarchy[base_model][model_name]:
+                # 尝试找到对应的图片文件
+                # 支持多种扩展名
+                for ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff']:
+                    filename = f"{image_id}{ext}"
+                    source_file = get_source_image_path_cached(filename, file_index)
+                    
+                    if source_file:
+                        dest_file = model_path / filename
+                        symlink_tasks.append((source_file, dest_file))
+                        break
     
     print(f"准备了 {len(symlink_tasks)} 个符号链接任务\n")
     
@@ -290,28 +327,31 @@ def organize_images_by_basemodel(csv_file, image_source_dir, output_base_dir):
     print(f"{'='*60}")
     print(f"输出目录: {output_dir}")
     print(f"处理的baseModel数量: {len(hierarchy)}")
+    print(f"处理的model数量: {sum(len(models) for models in hierarchy.values())}")
     print(f"成功创建符号链接: {total_linked} 个")
     print(f"创建失败: {total_failed} 个")
     print(f"{'='*60}\n")
 
 def main():
-    if len(sys.argv) < 4:
-        print("使用方法: python3 organize_by_basemodel.py <csv_file> <image_source_dir> <output_base_dir>")
+    if len(sys.argv) < 5:
+        print("使用方法: python3 organize_by_basemodelandvarient.py <base_model_csv> <model_name_csv> <image_source_dir> <output_base_dir>")
         print()
         print("参数说明:")
-        print("  csv_file: CSV文件路径，包含 id 和 baseModel 列")
+        print("  base_model_csv: 第一个CSV文件路径，包含 id 和 baseModel（基础模型）列")
+        print("  model_name_csv: 第二个CSV文件路径，包含 id 和 baseModel（具体模型名称）列")
         print("  image_source_dir: 源图片存储目录（三层级结构的根目录）")
         print("  output_base_dir: 输出目录的根路径")
         print()
         print("示例:")
-        print("  python3 organize_by_basemodel.py merged_new_fetch_images.csv ./source_images ./organized_images")
+        print("  python3 organize_by_basemodelandvarient.py merged_new_fetch_images.csv merged_new_fetch_images_v2.csv ./source_images ./organized_images")
         sys.exit(1)
     
-    csv_file = sys.argv[1]
-    image_source_dir = sys.argv[2]
-    output_base_dir = sys.argv[3]
+    base_model_csv = sys.argv[1]
+    model_name_csv = sys.argv[2]
+    image_source_dir = sys.argv[3]
+    output_base_dir = sys.argv[4]
     
-    organize_images_by_basemodel(csv_file, image_source_dir, output_base_dir)
+    organize_images_by_two_csvs(base_model_csv, model_name_csv, image_source_dir, output_base_dir)
 
 
 if __name__ == '__main__':
